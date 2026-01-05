@@ -34,3 +34,8 @@
 
 การจัดการกรณีไม่พบสมุนไพร: หากไม่พบชื่อสมุนไพรใน Google Sheet ให้ส่งข้อความ:
 ไม่พบสมุนไพรในระบบ กรุณาสอบถาม Admin
+
+***ข้อมูลสำคัญสำหรับสร้าง code***
+✅ ผมติตตั้ง better log ในไฟล comment.gs เพื่อทำการ debugging แบบนี้ var log = BetterLog.useSpreadsheet(); โปรดแทรกโคด better log เพื่อ track แต่ละขั้นตอนด้วยครับ
+✅ ใน better log ใช้ได้แค่ log.info(...) เท่านั้น ห้ามใช้แบบอื่นนอกเหนือจาก info เช่น warning, error เป็นต้น
+✅ log ทุกอันที่มีการแสดงค่าจากตัวแปรต้องใช้ JSON.stringify() เสมอ

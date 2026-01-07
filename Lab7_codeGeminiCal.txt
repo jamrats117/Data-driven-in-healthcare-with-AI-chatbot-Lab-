@@ -1,0 +1,138 @@
+function doPost(e) {
+  var log = BetterLog.useSpreadsheet();
+  log.info("📩 Incoming Event: " + JSON.stringify(e));
+
+  var body = JSON.parse(e.postData.contents);
+  log.info("📦 Body: " + JSON.stringify(body));
+
+  var event = body.events[0];
+  var userId = event.source.userId;
+  var replyToken = event.replyToken;
+  var userMessage = event.message.text.trim();
+
+  log.info("👤 User ID: " + JSON.stringify(userId));
+  log.info("💬 User Message: " + JSON.stringify(userMessage));
+
+  var cache = CacheService.getUserCache();
+  var state = cache.get(userId);
+
+  log.info("📌 Current State: " + JSON.stringify(state));
+
+  // เริ่มต้นคำนวณ BMI
+  if (userMessage === "BMI" || userMessage === "คำนวณ BMI") {
+    cache.put(userId, "ASK_WEIGHT", 600);
+    replyText(replyToken, "⚖️ กรุณาระบุน้ำหนักของคุณ (kg)");
+    return;
+  }
+
+  // รับน้ำหนัก
+  if (state === "ASK_WEIGHT") {
+    cache.put(userId + "_weight", userMessage, 600);
+    cache.put(userId, "ASK_HEIGHT", 600);
+
+    log.info("⚖️ Weight Saved: " + JSON.stringify(userMessage));
+    replyText(replyToken, "📏 กรุณาระบุส่วนสูงของคุณ (เมตร เช่น 1.70)");
+    return;
+  }
+
+  // รับส่วนสูง
+  if (state === "ASK_HEIGHT") {
+    cache.put(userId + "_height", userMessage, 600);
+    cache.put(userId, "CONFIRM", 600);
+
+    var weight = cache.get(userId + "_weight");
+    var height = userMessage;
+
+    log.info("📏 Height Saved: " + JSON.stringify(height));
+
+    replyText(
+      replyToken,
+      "✅ ยืนยันข้อมูลอีกครั้ง\n\n" +
+      "⚖️ น้ำหนัก: " + weight + " kg\n" +
+      "📏 ส่วนสูง: " + height + " m\n\n" +
+      "👉 ใช่กด 1\n👉 ไม่ใช่กด 2"
+    );
+    return;
+  }
+
+  // ยืนยัน
+  if (state === "CONFIRM") {
+    if (userMessage === "1") {
+      var weight = parseFloat(cache.get(userId + "_weight"));
+      var height = parseFloat(cache.get(userId + "_height"));
+
+      log.info("📊 Confirm Weight: " + JSON.stringify(weight));
+      log.info("📊 Confirm Height: " + JSON.stringify(height));
+
+      var bmi = weight / (height * height);
+      var bmiResult = bmi.toFixed(2);
+
+      var interpretation = interpretBMI(bmi);
+
+      replyText(
+        replyToken,
+        "🎉 ผลการคำนวณ BMI 🎉\n\n" +
+        "📊 BMI ของคุณคือ: *" + bmiResult + "*\n" +
+        interpretation
+      );
+
+      cache.remove(userId);
+      cache.remove(userId + "_weight");
+      cache.remove(userId + "_height");
+
+      return;
+    }
+
+    if (userMessage === "2") {
+      cache.remove(userId);
+      replyText(replyToken, "❌ ยกเลิกการคำนวณแล้ว\nพิมพ์ *BMI* เพื่อเริ่มใหม่ 😊");
+      return;
+    }
+  }
+}
+
+function interpretBMI(bmi) {
+  var log = BetterLog.useSpreadsheet();
+  log.info("🧮 BMI Value: " + JSON.stringify(bmi));
+
+  if (bmi < 18.5) {
+    return "🍃 อยู่ในเกณฑ์ *น้ำหนักน้อย*";
+  } else if (bmi < 23) {
+    return "💪 อยู่ในเกณฑ์ *ปกติ*";
+  } else if (bmi < 25) {
+    return "⚠️ อยู่ในเกณฑ์ *น้ำหนักเกิน*";
+  } else if (bmi < 30) {
+    return "🚨 อยู่ในเกณฑ์ *อ้วนระดับ 1*";
+  } else {
+    return "🔥 อยู่ในเกณฑ์ *อ้วนระดับ 2*";
+  }
+}
+
+
+function replyText(replyToken, text) {
+  var log = BetterLog.useSpreadsheet();
+
+  var token = PropertiesService.getScriptProperties()
+    .getProperty("LINE_CHANNEL_ACCESS_TOKEN");
+
+  log.info("📤 Reply Text: " + JSON.stringify(text));
+
+  var payload = {
+    replyToken: replyToken,
+    messages: [{
+      type: "text",
+      text: text
+    }]
+  };
+
+  var options = {
+    method: "post",
+    contentType: "application/json",
+    headers: {
+      Authorization: "Bearer " + token
+    },
+    payload: JSON.stringify(payload)
+  };
+
+  UrlFetchApp.fetch("https://api.line.me/v2/bot/message/reply", options);
+}

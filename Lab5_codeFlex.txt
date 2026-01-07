@@ -1,0 +1,233 @@
+/**
+ * =================================================================
+ * 🚀 DIALOGFLOW ES WEBHOOK - CODE.GS (FLEX MESSAGE VERSION)
+ * =================================================================
+ * - Cache-only (ไม่อ่าน Sheet ใน doPost)
+ * - ส่ง Flex Message (LINE) ผ่าน Dialogflow
+ * - ธีมสีเขียวฟ้าพาสเทล
+ * - ใช้งานร่วมกับ cache.gs
+ */
+
+// ----------------------------------------------------------------
+// 🔧 CONFIGURATION
+// ----------------------------------------------------------------
+
+const INTENT_PREFIX = "herb";
+const CODE_REGEX = /^[hH]\d+/;
+
+// =================================================================
+// 🏛️ CORE CACHE-ONLY WRAPPERS
+// =================================================================
+
+function getDataCacheOnly_() {
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get(CACHE_KEY);
+
+  if (cached) {
+    try {
+      return JSON.parse(cached);
+    } catch (e) {
+      Logger.log("Error parsing cache: " + e.message);
+      return null;
+    }
+  }
+  return null;
+}
+
+function findByIndexCacheOnly_(key, value) {
+  if (!value) return null;
+
+  const cacheData = getDataCacheOnly_();
+  if (!cacheData) return "CACHE_MISS";
+
+  const indexer = INDEX_KEYS[key];
+  if (!indexer || !cacheData.index || !cacheData.index[key]) {
+    Logger.log("Index key not found: " + key);
+    return null;
+  }
+
+  const normalizedValue = indexer(value);
+  return cacheData.index[key][normalizedValue] || null;
+}
+
+// =================================================================
+// 🌐 WEBHOOK ENTRY POINT
+// =================================================================
+
+function doPost(e) {
+  Logger.log("--- doPost Start ---");
+
+  try {
+    const request = JSON.parse(e.postData.contents);
+    const intentName = request.queryResult.intent.displayName;
+    Logger.log("Intent: " + intentName);
+
+    if (!intentName.startsWith(INTENT_PREFIX)) {
+      return emptyResponse_();
+    }
+
+    const query = extractQueryFromContexts_(request.queryResult.outputContexts);
+    if (!query) {
+      return textResponse_("🤔 ไม่พบคำค้นหา กรุณาลองใหม่อีกครั้งค่ะ");
+    }
+
+    const searchKey = CODE_REGEX.test(query) ? "code" : "herb";
+    const result = findByIndexCacheOnly_(searchKey, query);
+
+    if (result === "CACHE_MISS") {
+      return textResponse_("⏳ ระบบกำลังเตรียมข้อมูล กรุณาลองใหม่อีกครั้งใน 1–2 นาทีค่ะ");
+    }
+
+    if (!result) {
+      return textResponse_(`🙁 ไม่พบข้อมูล "${query}" ในระบบค่ะ`);
+    }
+
+    // ✅ FOUND → FLEX MESSAGE
+    const flex = createFlexHerbMessage_(result);
+    return flexResponse_(flex);
+
+  } catch (err) {
+    Logger.log("CRITICAL ERROR: " + err + " | " + err.stack);
+    return textResponse_("🚨 ระบบขัดข้อง กรุณาแจ้ง Admin ค่ะ");
+  } finally {
+    Logger.log("--- doPost End ---");
+  }
+}
+
+// =================================================================
+// 🧰 CONTEXT & QUERY
+// =================================================================
+
+function extractQueryFromContexts_(outputContexts) {
+  if (!outputContexts) return null;
+
+  for (let i = 0; i < outputContexts.length; i++) {
+    const p = outputContexts[i].parameters;
+    if (!p) continue;
+
+    if (p.herb && String(p.herb).trim()) {
+      return String(p.herb).trim();
+    }
+    if (p["herb.original"] && String(p["herb.original"]).trim()) {
+      return String(p["herb.original"]).trim();
+    }
+  }
+  return null;
+}
+
+// =================================================================
+// 🎨 FLEX MESSAGE BUILDER (PASTEL GREEN-BLUE)
+// =================================================================
+
+function createFlexHerbMessage_(item) {
+  return {
+    type: "flex",
+    altText: `ข้อมูลสมุนไพร ${item.herb}`,
+    contents: {
+      type: "bubble",
+      size: "mega",
+      styles: {
+        body: {
+          backgroundColor: "#E6F7F4"
+        }
+      },
+      body: {
+        type: "box",
+        layout: "vertical",
+        spacing: "md",
+        contents: [
+
+          {
+            type: "text",
+            text: "🌿 ข้อมูลสมุนไพร",
+            weight: "bold",
+            size: "lg",
+            color: "#1B7F7A"
+          },
+
+          {
+            type: "box",
+            layout: "vertical",
+            backgroundColor: "#BEEAE3",
+            cornerRadius: "12px",
+            paddingAll: "12px",
+            contents: [
+              {
+                type: "text",
+                text: item.herb,
+                weight: "bold",
+                size: "xl",
+                color: "#065F5B"
+              },
+              {
+                type: "text",
+                text: `รหัส: ${item.code}`,
+                size: "sm",
+                color: "#3A9188"
+              }
+            ]
+          },
+
+          flexRow_("✨ สรรพคุณ", item.effect),
+          flexRow_("📝 รายละเอียด", item.description),
+          flexRow_("📊 ระดับความน่าเชื่อถือ", item.loe),
+          flexRow_("📚 อ้างอิง", item.ref)
+        ]
+      }
+    }
+  };
+}
+
+function flexRow_(label, value) {
+  return {
+    type: "box",
+    layout: "vertical",
+    spacing: "xs",
+    contents: [
+      {
+        type: "text",
+        text: label,
+        weight: "bold",
+        size: "sm",
+        color: "#1B7F7A"
+      },
+      {
+        type: "text",
+        text: value || "-",
+        size: "sm",
+        wrap: true,
+        color: "#065F5B"
+      }
+    ]
+  };
+}
+
+// =================================================================
+// 📦 RESPONSE HELPERS (Dialogflow Compatible)
+// =================================================================
+
+function flexResponse_(flexMessage) {
+  return ContentService.createTextOutput(JSON.stringify({
+    fulfillmentMessages: [
+      {
+        payload: {
+          line: flexMessage
+        }
+      }
+    ]
+  })).setMimeType(ContentService.MimeType.JSON);
+}
+
+function textResponse_(text) {
+  return ContentService.createTextOutput(JSON.stringify({
+    fulfillmentText: text,
+    fulfillmentMessages: [
+      { text: { text: [text] } }
+    ]
+  })).setMimeType(ContentService.MimeType.JSON);
+}
+
+function emptyResponse_() {
+  return ContentService.createTextOutput(JSON.stringify({}))
+    .setMimeType(ContentService.MimeType.JSON);
+}
